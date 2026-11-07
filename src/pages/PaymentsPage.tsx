@@ -9,6 +9,7 @@ import {
   signedDriverPaymentAmount,
   sumMoney,
 } from "../domain/financials";
+import { companyPaymentStatusLabel } from "../utils/statusDerivation";
 
 // The page-level "Add Payment" button is hidden; driver payments are made from the shipment pop-up ("Pay driver").
 const SHOW_PAYMENTS_PAGE_ADD_BUTTON = false;
@@ -150,7 +151,7 @@ export function PaymentsPage({
                       <td className="num">{money(row.companyTotal)}</td>
                       <td className="num">{money(row.companyTotal - pending)}</td>
                       <td className="num">{money(pending)}</td>
-                      <td><div className="flex flex-wrap gap-1.5"><StatusBadge status={row.clientPaymentStatus} /><StatusBadge status={row.invoiceStatus} /></div></td>
+                      <td><div className="flex flex-wrap gap-1.5"><StatusBadge status={row.clientPaymentStatus} label={companyPaymentStatusLabel(row.clientPaymentStatus)} /><StatusBadge status={row.invoiceStatus} /></div></td>
                       <td><button className="table-action" onClick={openPayment}>Record</button></td>
                     </tr>
                   );

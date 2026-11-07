@@ -4,6 +4,7 @@ import type { ClientPayment, Invoice, InvoiceItem, Shipment } from "../types/dom
 import { formatDate, money } from "../utils/formatters";
 import { EmptyState, KpiGrid, PageTitle, StatusBadge } from "../components/ui";
 import { calculateInvoiceBalance, signedClientPaymentAmount, sumMoney } from "../domain/financials";
+import { companyPaymentStatusLabel } from "../utils/statusDerivation";
 
 export function InvoicesPage({
   shipments,
@@ -201,7 +202,7 @@ export function InvoicesPage({
                       <td>
                         <div className="flex flex-wrap gap-1.5">
                           <StatusBadge status={row.invoiceStatus} />
-                          <StatusBadge status={row.clientPaymentStatus} />
+                          <StatusBadge status={row.clientPaymentStatus} label={companyPaymentStatusLabel(row.clientPaymentStatus)} />
                         </div>
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>

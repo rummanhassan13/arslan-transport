@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Invoice, Shipment } from "../types/domain";
-import { SETTABLE_INVOICE_STATUSES, deriveDisplayInvoiceStatus, invoiceStatusLabel } from "./statusDerivation";
+import { SETTABLE_INVOICE_STATUSES, companyPaymentStatusLabel, deriveDisplayInvoiceStatus, invoiceStatusLabel } from "./statusDerivation";
 
 const shipment = {} as Shipment;
 const invoice = (status: Invoice["status"]) => ({ status }) as Invoice;
@@ -23,5 +23,13 @@ describe("invoice status display", () => {
     expect(deriveDisplayInvoiceStatus(shipment, invoice("cancelled"))).toBe("Cancelled");
     // Paid/overdue invoice records still display as Pending; payment progress is shown by Company payment.
     expect(invoiceStatusLabel(deriveDisplayInvoiceStatus(shipment, invoice("paid")))).toBe("Pending");
+  });
+});
+
+describe("company payment status display", () => {
+  it("shows Paid as Received and keeps other labels", () => {
+    expect(companyPaymentStatusLabel("Paid")).toBe("Received");
+    expect(companyPaymentStatusLabel("Pending")).toBe("Pending");
+    expect(companyPaymentStatusLabel("Partially Paid")).toBe("Partially Paid");
   });
 });

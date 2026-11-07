@@ -1103,14 +1103,14 @@ html[data-sidebar-pinned="false"] .v2-topbar {
 }
 
 .status-pending,
-.status-draft,
-.status-advance-paid {
+.status-draft {
   border-color: rgba(220, 104, 3, 0.15);
   background: rgba(220, 104, 3, 0.08);
   color: var(--warning);
 }
 
 .status-paid,
+.status-advance-paid,
 .status-active,
 .status-sent,
 .status-approved,
