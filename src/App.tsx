@@ -632,7 +632,7 @@ function DemoApp() {
       setToast("Nothing is outstanding for this company.");
       return;
     }
-    if (!window.confirm(`Record ${money(outstanding)} company payment as paid?`)) return;
+    if (!window.confirm(`Record ${money(outstanding)} company payment as received?`)) return;
     try {
       await createClientPayment({
         invoiceId: invoice.id,

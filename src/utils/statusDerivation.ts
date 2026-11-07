@@ -9,6 +9,11 @@ export function invoiceStatusLabel(status: InvoiceStatus): string {
   return status === "Draft" ? "Pending" : status;
 }
 
+/** UI label for a company payment status: money from a company is "Received"; the stored value stays "Paid". */
+export function companyPaymentStatusLabel(status: PaymentStatus | string): string {
+  return status === "Paid" ? "Received" : status;
+}
+
 /**
  * Derive the display-facing invoice status from the live invoice record.
  * Falls back to the shipment's own field when no invoice record exists.

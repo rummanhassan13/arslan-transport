@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { MoveRight, Plus, Printer, Trash2 } from "lucide-react";
 import { Modal, StatusBadge } from "./ui";
 import type { Shipment, ShipmentExpense, ShipmentExpenseInput, ShipmentAttachment, ClientPayment, DriverPayment, DriverPaymentInput, InvoiceStatus, PaymentStatus } from "../types/domain";
-import { SETTABLE_INVOICE_STATUSES, invoiceStatusLabel } from "../utils/statusDerivation";
+import { SETTABLE_INVOICE_STATUSES, companyPaymentStatusLabel, invoiceStatusLabel } from "../utils/statusDerivation";
 import { getDriverRateRows, isCountedInCompanyTotal, selectPayDriverExpenses } from "../utils/shipmentBreakdown";
 import { COMPANY_PAYMENT_STATUS_OPTIONS, DRIVER_PAYMENT_STATUS_OPTIONS, PAYMENT_STATUS_LOCKED_HINT, canMovePaymentStatus } from "../utils/paymentStatusActions";
 import { money, formatDate, labelize } from "../utils/formatters";
@@ -513,11 +513,11 @@ export function ShipmentSummaryModal({
                       onChange={(event) => { if (event.target.value === "Paid") onMarkCompanyPaid(shipment); }}
                     >
                       {withCurrent(COMPANY_PAYMENT_STATUS_OPTIONS, companyPaymentStatus).map((status) => (
-                        <option key={status} value={status} disabled={!canMovePaymentStatus("company", companyPaymentStatus, status)}>{status}</option>
+                        <option key={status} value={status} disabled={!canMovePaymentStatus("company", companyPaymentStatus, status)}>{companyPaymentStatusLabel(status)}</option>
                       ))}
                     </select>
                   ) : (
-                    <div><StatusBadge status={companyPaymentStatus} /></div>
+                    <div><StatusBadge status={companyPaymentStatus} label={companyPaymentStatusLabel(companyPaymentStatus)} /></div>
                   )}
                 </div>
               </div>

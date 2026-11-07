@@ -6,7 +6,7 @@ import { useAuth } from "../hooks/useAuth";
 import { filterShipments, sum } from "../utils/calculations";
 import { formatDate, money } from "../utils/formatters";
 import { EmptyState, KpiGrid, PageTitle, SkeletonTable, StatusBadge } from "../components/ui";
-import { SETTABLE_INVOICE_STATUSES, invoiceStatusLabel } from "../utils/statusDerivation";
+import { SETTABLE_INVOICE_STATUSES, companyPaymentStatusLabel, invoiceStatusLabel } from "../utils/statusDerivation";
 import { canManageInvoices, canManagePayments, canManageShipments } from "../utils/permissions";
 import { companyColor, companyColorStyle } from "../utils/companyColors";
 
@@ -274,7 +274,7 @@ function ShipmentTable({
             <div className="shipment-mobile-card-meta">
               <span><UserRound size={13} /> {row.assignments && row.assignments.length > 1 ? `${row.driverName} + ${row.assignments.length - 1}` : row.driverName}</span>
               <span><TruckIcon size={13} /> {row.vehicleNo}</span>
-              <StatusBadge status={row.clientPaymentStatus} label={`Company ${row.clientPaymentStatus}`} />
+              <StatusBadge status={row.clientPaymentStatus} label={`Company ${companyPaymentStatusLabel(row.clientPaymentStatus)}`} />
               <StatusBadge status={row.driverPaymentStatus} label={`Driver ${row.driverPaymentStatus}`} />
             </div>
             <div className="shipment-mobile-card-footer">
@@ -357,7 +357,7 @@ function ShipmentTable({
                     ) : (
                       <StatusBadge status={row.invoiceStatus} label={`Invoice · ${invoiceStatusLabel(row.invoiceStatus)}`} />
                     )}
-                    <StatusBadge status={row.clientPaymentStatus} label={`Company · ${row.clientPaymentStatus}`} />
+                    <StatusBadge status={row.clientPaymentStatus} label={`Company · ${companyPaymentStatusLabel(row.clientPaymentStatus)}`} />
                     <StatusBadge status={row.driverPaymentStatus} label={`Driver · ${row.driverPaymentStatus}`} />
                   </div>
                 </td>
