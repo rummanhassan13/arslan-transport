@@ -1916,6 +1916,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .arslan-charge-table .num {
   text-align: center;
 }
+/* Driver details and waybill number: slightly heavier so they stand out from the charges. */
+.arslan-charge-table td.arslan-detail-cell {
+  font-weight: 600;
+}
 .arslan-vehicle-row td {
   border-bottom: 1px solid #000;
   min-height: 140px;

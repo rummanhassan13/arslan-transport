@@ -115,7 +115,7 @@ export function StandaloneInvoiceTemplate({ data, documentRef }: StandaloneInvoi
           <tbody>
             {data.rows.map((row, rowIndex) => (
               <tr key={rowIndex}>
-                <td>
+                <td className={row.detailOnly ? "arslan-detail-cell" : undefined}>
                   {String(row.description || "").split("\n").map((line, lineIndex) => (
                     <div key={lineIndex} style={{ minHeight: line.trim() === "" ? "0.75rem" : "auto" }}>
                       {line}

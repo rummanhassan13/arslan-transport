@@ -134,6 +134,44 @@ export function useInvoices(shipments: Shipment[], expenses: ShipmentExpense[] =
     localStorage.setItem(demoInvoiceItemsKey, JSON.stringify(invoiceItems));
   }, [invoiceItems]);
 
+  // Demo mode stands in for the database: keep each invoice's trip line and totals equal to
+  // its shipment's company rate (the live database does this in sync_invoice_company_rate).
+  useEffect(() => {
+    if (!env.demoMode) return;
+    const rateByShipment = new Map(shipments.map((shipment) => [shipment.id, Number(shipment.companyRate) || 0]));
+    const rateByInvoice = new Map<string, number>();
+    invoices.forEach((invoice) => {
+      if (invoice.status === "cancelled" || !invoice.shipmentId || !rateByShipment.has(invoice.shipmentId)) return;
+      rateByInvoice.set(invoice.id, rateByShipment.get(invoice.shipmentId) as number);
+    });
+
+    const itemsOutOfStep = invoiceItems.some((item) => {
+      const rate = rateByInvoice.get(item.invoiceId);
+      return item.itemType === "transport" && rate !== undefined && (item.amount !== rate || item.unitPrice !== rate);
+    });
+    const nextItems = itemsOutOfStep
+      ? invoiceItems.map((item) => {
+          const rate = rateByInvoice.get(item.invoiceId);
+          return item.itemType === "transport" && rate !== undefined ? { ...item, unitPrice: rate, amount: rate } : item;
+        })
+      : invoiceItems;
+
+    let invoicesOutOfStep = false;
+    const nextInvoices = invoices.map((invoice) => {
+      if (!rateByInvoice.has(invoice.id)) return invoice;
+      const items = nextItems.filter((item) => item.invoiceId === invoice.id);
+      if (!items.some((item) => item.itemType === "transport")) return invoice;
+      const subtotal = items.filter((item) => item.itemType !== "expense").reduce((sum, item) => sum + item.amount, 0);
+      const expenseTotal = items.filter((item) => item.itemType === "expense").reduce((sum, item) => sum + item.amount, 0);
+      if (invoice.subtotal === subtotal && invoice.expenseTotal === expenseTotal && invoice.totalAmount === subtotal + expenseTotal) return invoice;
+      invoicesOutOfStep = true;
+      return { ...invoice, subtotal, expenseTotal, totalAmount: subtotal + expenseTotal };
+    });
+
+    if (itemsOutOfStep) setInvoiceItems(nextItems);
+    if (invoicesOutOfStep) setInvoices(nextInvoices);
+  }, [invoiceItems, invoices, shipments]);
+
   const refreshInvoices = useCallback(async () => {
     if (env.demoMode) {
       setError(null);
