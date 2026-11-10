@@ -167,7 +167,8 @@ export function useShipments() {
 
     const updated = await updateSupabaseShipment(organizationId, id, sanitizedInput);
     setShipments((current) => current.map((shipment) => (shipment.id === id ? updated : shipment)));
-    notifyGlobalRefresh("shipments");
+    // Saving a shipment also updates its invoice amount in the database, so reload invoices too.
+    notifyGlobalRefresh(["shipments", "invoices"]);
     return updated;
   }, [organizationId]);
 
