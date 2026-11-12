@@ -7,12 +7,10 @@ import {
   type ReportDateRange,
   type ShipmentReportRow,
 } from "../domain/shipmentReport";
-import { getStoredCurrencyCode } from "../utils/formatters";
 
+/** Only the period is needed now: it names the downloaded file. */
 export type ShipmentReportMeta = {
   range: ReportDateRange;
-  periodLabel: string;
-  customer: string;
 };
 
 const MONEY_FORMAT = "#,##0.00";
@@ -28,7 +26,8 @@ function downloadBlob(blob: Blob, fileName: string) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // Keep the URL alive long enough for slow "Save as" dialogs / embedded browsers to fetch it.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 export function downloadShipmentReportCsv(rows: ShipmentReportRow[], meta: ShipmentReportMeta) {
@@ -54,16 +53,13 @@ function dataCell(row: ShipmentReportRow, column: (typeof SHIPMENT_REPORT_COLUMN
   return { value: String(value ?? ""), type: String };
 }
 
-export function buildShipmentReportSheet(rows: ShipmentReportRow[], meta: ShipmentReportMeta): SheetData {
+/**
+ * One flat table, like the shipment register: the header on row 1, then one row per shipment, then a totals row.
+ * No title or per-company summary block above it, so the sheet sorts and filters cleanly.
+ */
+export function buildShipmentReportSheet(rows: ShipmentReportRow[]): SheetData {
   const columns = SHIPMENT_REPORT_COLUMNS;
-  const span = columns.length;
   const totals = totalReportRows(rows);
-  const generated = new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-
-  const metaRow = (label: string, value: string): Row => [
-    { value: label, type: String, fontWeight: "bold" },
-    { value, type: String, columnSpan: span - 1 },
-  ];
 
   const header: Row = columns.map((column) => ({
     value: column.header,
@@ -88,30 +84,17 @@ export function buildShipmentReportSheet(rows: ShipmentReportRow[], meta: Shipme
     return total === undefined ? base : { ...base, value: total, type: Number, format: MONEY_FORMAT };
   });
 
-  return [
-    [{ value: "ARSLAN TRANSPORTATION L.L.C — SHIPMENT REPORT", type: String, fontWeight: "bold", fontSize: 14, columnSpan: span }],
-    metaRow("Period", meta.periodLabel),
-    metaRow("Company", meta.customer),
-    metaRow("Shipments", String(rows.length)),
-    metaRow("Currency", getStoredCurrencyCode()),
-    metaRow("Generated", generated),
-    [],
-    header,
-    ...body,
-    ...(rows.length ? [totalRow] : []),
-  ];
+  return [header, ...body, ...(rows.length ? [totalRow] : [])];
 }
-
-/** Rows above the table header, plus the header itself (kept visible while scrolling). */
-const STICKY_ROWS = 8;
 
 export async function downloadShipmentReportXlsx(rows: ShipmentReportRow[], meta: ShipmentReportMeta) {
   const { default: writeXlsxFile } = await import("write-excel-file/browser");
-  const data = buildShipmentReportSheet(rows, meta);
+  const data = buildShipmentReportSheet(rows);
   const blob = await writeXlsxFile(data, {
     sheet: "Shipments",
     columns: SHIPMENT_REPORT_COLUMNS.map((column) => ({ width: column.width })),
-    stickyRowsCount: STICKY_ROWS,
+    // Keep the header row and the date / shipment columns visible while scrolling.
+    stickyRowsCount: 1,
     stickyColumnsCount: 3,
   }, { fontFamily: "Calibri", fontSize: 11 }).toBlob();
   downloadBlob(blob, reportFileName(meta.range, "xlsx"));

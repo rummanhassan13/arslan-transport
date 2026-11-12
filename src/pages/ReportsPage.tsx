@@ -74,7 +74,7 @@ function ShipmentReportCard({ shipments, expenses, drivers }: ReportsPageProps) 
     setExportError("");
     setExporting(format);
     try {
-      const meta = { range, periodLabel: label, customer: customer || "All companies" };
+      const meta = { range };
       if (format === "xlsx") await downloadShipmentReportXlsx(rows, meta);
       else downloadShipmentReportCsv(rows, meta);
     } catch (error) {

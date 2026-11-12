@@ -126,18 +126,35 @@ describe("buildShipmentReportRows", () => {
     expect(row.naql).toBe(0);
   });
 
-  it("derives add-ons and other costs that reconcile with net profit", () => {
+  it("derives company and driver add-ons from the totals", () => {
     expect(row.companyAddOn).toBe(150);
     expect(row.driverAddOn).toBe(50);
-    expect(row.otherCosts).toBe(50);
-    expect(row.companyTotal - row.driverTotal - row.otherCosts).toBe(row.netProfit);
+    expect(row.netProfit).toBe(450);
   });
 
-  it("pulls driver details from the driver directory", () => {
+  it("pulls the driver phone from the shipment and driver directory", () => {
     expect(row.driverPhone).toBe("050111 / 050222");
-    expect(row.driverCnic).toBe("784-1");
-    expect(row.driverLicense).toBe("LIC-9");
     expect(row.shipmentStatus).toBe("In Transit");
+  });
+
+  it("does not include the removed columns", () => {
+    for (const key of ["waybillNo", "driverCnic", "driverLicense", "driverProvider", "otherCosts", "driverBalance", "companyPaid", "driverPaid"]) {
+      expect(row).not.toHaveProperty(key);
+    }
+  });
+
+  it("keeps one row per shipment, in date order", () => {
+    const many = buildShipmentReportRows(
+      [
+        shipment({ id: "b", sr: 2, date: "2026-04-12", customer: "Acme, LLC" }),
+        shipment({ id: "a", sr: 1, date: "2026-04-10", customer: "Acme, LLC" }),
+        shipment({ id: "c", sr: 3, date: "2026-04-11", customer: "Other Co" }),
+      ],
+      [],
+      [],
+    );
+    expect(many.map((r) => r.date)).toEqual(["2026-04-10", "2026-04-11", "2026-04-12"]);
+    expect(many.map((r) => r.serial)).toEqual([1, 2, 3]);
   });
 
   it("totals money columns", () => {

@@ -83,16 +83,12 @@ export type ShipmentReportRow = {
   shipmentNo: string;
   date: string;
   invoiceNo: string;
-  waybillNo: string;
   shipmentStatus: string;
   loadingPoint: string;
   destination: string;
   customer: string;
   driverName: string;
   driverPhone: string;
-  driverCnic: string;
-  driverLicense: string;
-  driverProvider: string;
   vehicleNo: string;
   truckType: string;
   companyRate: number;
@@ -105,13 +101,9 @@ export type ShipmentReportRow = {
   driverAddOn: number;
   companyTotal: number;
   driverTotal: number;
-  otherCosts: number;
   netProfit: number;
   driverAdvance: number;
-  driverPaid: number;
-  driverBalance: number;
   driverPaymentStatus: string;
-  companyPaid: number;
   companyBalance: number;
   invoiceStatus: string;
   companyPaymentStatus: string;
@@ -133,16 +125,12 @@ export const SHIPMENT_REPORT_COLUMNS: ReportColumn[] = [
   { key: "shipmentNo", header: "Shipment No", kind: "text", width: 14 },
   { key: "date", header: "Date", kind: "date", width: 12 },
   { key: "invoiceNo", header: "Invoice No", kind: "text", width: 14 },
-  { key: "waybillNo", header: "Waybill No", kind: "text", width: 14 },
   { key: "shipmentStatus", header: "Shipment Status", kind: "text", width: 14 },
   { key: "loadingPoint", header: "Loading Point", kind: "text", width: 18 },
   { key: "destination", header: "Destination", kind: "text", width: 18 },
   { key: "customer", header: "Customer", kind: "text", width: 24 },
   { key: "driverName", header: "Driver Name", kind: "text", width: 22 },
   { key: "driverPhone", header: "Driver Phone", kind: "text", width: 16 },
-  { key: "driverCnic", header: "Driver CNIC / ID", kind: "text", width: 18 },
-  { key: "driverLicense", header: "Driver License No", kind: "text", width: 18 },
-  { key: "driverProvider", header: "Driver Provider", kind: "text", width: 18 },
   { key: "vehicleNo", header: "Vehicle No", kind: "text", width: 14 },
   { key: "truckType", header: "Truck Type", kind: "text", width: 14 },
   { key: "companyRate", header: "Company Rate", kind: "money", width: 14 },
@@ -155,13 +143,9 @@ export const SHIPMENT_REPORT_COLUMNS: ReportColumn[] = [
   { key: "driverAddOn", header: "Driver Add-on", kind: "money", width: 14 },
   { key: "companyTotal", header: "Company Total", kind: "money", width: 15 },
   { key: "driverTotal", header: "Driver Total", kind: "money", width: 14 },
-  { key: "otherCosts", header: "Other Company Costs", kind: "money", width: 16 },
   { key: "netProfit", header: "Net Profit", kind: "money", width: 14 },
   { key: "driverAdvance", header: "Driver Advance", kind: "money", width: 14 },
-  { key: "driverPaid", header: "Driver Paid", kind: "money", width: 14 },
-  { key: "driverBalance", header: "Driver Balance", kind: "money", width: 14 },
   { key: "driverPaymentStatus", header: "Driver Payment Status", kind: "text", width: 18 },
-  { key: "companyPaid", header: "Company Paid", kind: "money", width: 14 },
   { key: "companyBalance", header: "Company Balance", kind: "money", width: 15 },
   { key: "invoiceStatus", header: "Invoice Status", kind: "text", width: 14 },
   { key: "companyPaymentStatus", header: "Company Payment Status", kind: "text", width: 18 },
@@ -232,16 +216,12 @@ export function buildShipmentReportRows(
       shipmentNo: shipment.shipmentNo || String(shipment.sr ?? ""),
       date: shipmentBusinessDate(shipment),
       invoiceNo: shipment.invoiceReference || shipment.invoice || "",
-      waybillNo: shipment.waybillNumber ?? "",
       shipmentStatus: shipment.status ? STATUS_LABELS[shipment.status] : "",
       loadingPoint: shipment.loadingPoint ?? "",
       destination: shipment.destination ?? "",
       customer: shipment.customer || shipment.clientName || "",
       driverName: legs.length ? joinUnique(legs.map((leg) => leg.driverName)) : shipment.driverName ?? "",
       driverPhone: joinUnique([shipment.cellNo, ...legDrivers.map((driver) => driver?.phone)]),
-      driverCnic: joinUnique(legDrivers.map((driver) => driver?.cnic)),
-      driverLicense: joinUnique(legDrivers.map((driver) => driver?.licenseNumber)),
-      driverProvider: joinUnique(legDrivers.map((driver) => driver?.providerName)),
       vehicleNo: legs.length
         ? joinUnique(legs.map((leg) => leg.vehicleNo)) || shipment.vehicleNo || ""
         : shipment.vehicleNo || shipment.vehicleNumber || "",
@@ -255,14 +235,9 @@ export function buildShipmentReportRows(
       driverAddOn: roundMoney(driverTotal - driverRate),
       companyTotal,
       driverTotal,
-      // Company Total − Driver Total − Other Company Costs = Net Profit.
-      otherCosts: roundMoney(companyTotal - driverTotal - netProfit),
       netProfit,
       driverAdvance: roundMoney(shipment.advance),
-      driverPaid: roundMoney(shipment.driverPaid ?? 0),
-      driverBalance: roundMoney(shipment.pending),
       driverPaymentStatus: shipment.driverPaymentStatus ?? "",
-      companyPaid: roundMoney(shipment.clientPaid ?? 0),
       companyBalance: roundMoney(shipment.clientBalance ?? 0),
       invoiceStatus: shipment.invoiceStatus ?? "",
       companyPaymentStatus: shipment.clientPaymentStatus ?? "",
