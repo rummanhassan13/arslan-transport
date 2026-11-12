@@ -3,6 +3,7 @@ import { DeleteObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@3";
 
 type CleanupJob = {
   id: string;
+  organization_id: string;
   object_key: string;
   attempts: number;
   status: "pending" | "failed" | "processing";
@@ -21,6 +22,15 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// Constant-time comparison so the token can't be guessed from response timing.
+function tokensMatch(supplied: string, expected: string) {
+  const a = new TextEncoder().encode(supplied);
+  const b = new TextEncoder().encode(expected);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < b.length; i += 1) diff |= (a[i] ?? 0) ^ b[i];
+  return diff === 0;
+}
+
 function r2Client() {
   return new S3Client({
     region: "auto",
@@ -37,14 +47,14 @@ Deno.serve(async (request) => {
   try {
     const expectedToken = required("ATTACHMENT_CLEANUP_TOKEN");
     const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-    if (!suppliedToken || suppliedToken !== expectedToken) return json({ error: "Unauthorized." }, 401);
+    if (!suppliedToken || !tokensMatch(suppliedToken, expectedToken)) return json({ error: "Unauthorized." }, 401);
 
     const supabase = createClient(required("SUPABASE_URL"), required("SUPABASE_SERVICE_ROLE_KEY"), {
       auth: { persistSession: false },
     });
     const { data, error } = await supabase
       .from("attachment_cleanup_jobs")
-      .select("id, object_key, attempts, status")
+      .select("id, organization_id, object_key, attempts, status")
       .in("status", ["pending", "failed"])
       .lt("attempts", 5)
       .order("created_at", { ascending: true })
@@ -56,6 +66,16 @@ Deno.serve(async (request) => {
     const results: Array<{ id: string; status: "completed" | "failed"; error?: string }> = [];
 
     for (const job of (data ?? []) as CleanupJob[]) {
+      // Only ever delete files inside the job's own organization folder.
+      if (!job.object_key.startsWith(`organizations/${job.organization_id}/`)) {
+        await supabase
+          .from("attachment_cleanup_jobs")
+          .update({ status: "failed", attempts: 5, last_error: "Refused: file path is outside the organization folder.", updated_at: new Date().toISOString() })
+          .eq("id", job.id);
+        results.push({ id: job.id, status: "failed", error: "path outside organization folder" });
+        continue;
+      }
+
       const nextAttempts = job.attempts + 1;
       const { data: claimed, error: claimError } = await supabase
         .from("attachment_cleanup_jobs")

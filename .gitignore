@@ -14,3 +14,10 @@ tools/google-sheets-invoice/
 .env.local
 .env.*.local
 supabase/.temp/
+
+# Real business data and one-off import files: never commit (the repo is public)
+import-data/
+supabase/scripts/import_*.sql
+*.xlsx
+*.xls
+*.csv

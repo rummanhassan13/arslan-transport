@@ -15,6 +15,7 @@ import {
   Sun,
   Truck,
   UserCircle,
+  UsersRound,
   X,
   Landmark,
   Menu,
@@ -72,6 +73,8 @@ function Brand({ name, logoUrl }: { name: string; logoUrl?: string }) {
 export function AppShell({ view, setView, query, setQuery, openShipment }: ShellProps) {
   const { activeOrganization, organizations, role, setActiveOrganization, signOut } = useAuth();
   const { company } = useBusinessSettings();
+  // Owners and admins approve new sign-ups (also enforced in the database).
+  const canReviewAccess = !env.demoMode && (role === "owner" || role === "admin");
   const [moreOpen, setMoreOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [sidebarAccountOpen, setSidebarAccountOpen] = useState(false);
@@ -218,6 +221,11 @@ export function AppShell({ view, setView, query, setQuery, openShipment }: Shell
       <button onClick={() => openSettings("Invoice Settings")} role="menuitem" type="button">
         <FileText size={16} /> Invoice settings
       </button>
+      {canReviewAccess && (
+        <button onClick={() => openSettings("User & Roles")} role="menuitem" type="button">
+          <UsersRound size={16} /> Access requests
+        </button>
+      )}
       <button onClick={toggleTheme} role="menuitem" type="button">
         {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         {theme === "dark" ? "Light appearance" : "Dark appearance"}
@@ -429,6 +437,9 @@ export function AppShell({ view, setView, query, setQuery, openShipment }: Shell
             </div>
             <button onClick={() => openSettings("Business Profile")} type="button"><Building2 size={17} /> Business profile</button>
             <button onClick={() => openSettings("Invoice Settings")} type="button"><FileText size={17} /> Invoice settings</button>
+            {canReviewAccess && (
+              <button onClick={() => openSettings("User & Roles")} type="button"><UsersRound size={17} /> Access requests</button>
+            )}
 
             <button onClick={toggleTheme} type="button">
               {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
