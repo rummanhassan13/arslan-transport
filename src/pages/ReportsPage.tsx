@@ -1,12 +1,26 @@
 import { useMemo, useState } from "react";
-import { createPortal } from "react-dom";
-import { FileDown } from "lucide-react";
-import { Card, PageTitle, StatusBadge } from "../components/ui";
-import type { Shipment } from "../types/domain";
+import { FileSpreadsheet, FileText } from "lucide-react";
+import { Card, PageTitle } from "../components/ui";
+import type { Driver, Shipment, ShipmentExpense } from "../types/domain";
 import { formatDate, money } from "../utils/formatters";
-import { MonthlySummaryPrintTemplate } from "../components/MonthlySummaryPrintTemplate";
+import {
+  REPORT_PERIOD_OPTIONS,
+  buildShipmentReportRows,
+  isInReportRange,
+  resolveReportRange,
+  toIsoDate,
+  totalReportRows,
+  type ReportPeriodPreset,
+} from "../domain/shipmentReport";
+import { downloadShipmentReportCsv, downloadShipmentReportXlsx } from "../services/reportExport";
 
-export function ReportsPage({ shipments }: { shipments: Shipment[] }) {
+type ReportsPageProps = {
+  shipments: Shipment[];
+  expenses: ShipmentExpense[];
+  drivers: Driver[];
+};
+
+export function ReportsPage({ shipments, expenses, drivers }: ReportsPageProps) {
   return (
     <>
       <PageTitle
@@ -14,127 +28,168 @@ export function ReportsPage({ shipments }: { shipments: Shipment[] }) {
         subtitle="Generate and export operations and financial reports."
       />
       <section className="report-grid">
-        <MonthlySummaryReportCard shipments={shipments} />
+        <ShipmentReportCard shipments={shipments} expenses={expenses} drivers={drivers} />
       </section>
     </>
   );
 }
 
-function MonthlySummaryReportCard({ shipments }: { shipments: Shipment[] }) {
+function periodLabel(start: string, end: string) {
+  if (!start && !end) return "All dates";
+  if (start && end) return start === end ? formatDate(start) : `${formatDate(start)} – ${formatDate(end)}`;
+  return start ? `From ${formatDate(start)}` : `Until ${formatDate(end)}`;
+}
+
+function ShipmentReportCard({ shipments, expenses, drivers }: ReportsPageProps) {
+  const [preset, setPreset] = useState<ReportPeriodPreset>("this_month");
+  const [month, setMonth] = useState(() => toIsoDate(new Date()).slice(0, 7));
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [customer, setCustomer] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [invoiceStatus, setInvoiceStatus] = useState("");
-  const [isPrinting, setIsPrinting] = useState(false);
+  const [exporting, setExporting] = useState<"xlsx" | "csv" | null>(null);
+  const [exportError, setExportError] = useState("");
 
-  const uniqueCustomers = useMemo(() => Array.from(new Set(shipments.map((s) => s.customer).filter(Boolean))), [shipments]);
+  const range = useMemo(
+    () => resolveReportRange(preset, { month, start: customStart, end: customEnd }),
+    [preset, month, customStart, customEnd],
+  );
 
-  const filteredShipments = useMemo(() => {
-    return shipments.filter((s) => {
-      if (s.deletedAt) return false;
-      if (customer && s.customer !== customer) return false;
-      if (invoiceStatus && s.invoiceStatus !== invoiceStatus) return false;
-      const sDate = s.date || s.shipmentDate;
-      if (startDate && sDate && sDate < startDate) return false;
-      if (endDate && sDate && sDate > endDate) return false;
-      return true;
-    });
-  }, [shipments, customer, invoiceStatus, startDate, endDate]);
+  const customers = useMemo(
+    () => Array.from(new Set(shipments.map((s) => s.customer).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [shipments],
+  );
 
-  const handleExportPdf = () => {
-    if (filteredShipments.length > 80) {
-      alert("Too many shipments for one page. Please reduce the date range.");
-      return;
+  const rows = useMemo(() => {
+    const inScope = shipments.filter(
+      (s) => !s.deletedAt && (!customer || s.customer === customer) && isInReportRange(s, range),
+    );
+    return buildShipmentReportRows(inScope, expenses, drivers);
+  }, [shipments, expenses, drivers, customer, range]);
+
+  const totals = useMemo(() => totalReportRows(rows), [rows]);
+  const label = periodLabel(range.start, range.end);
+  const invalidRange = Boolean(range.start && range.end && range.start > range.end);
+
+  const runExport = async (format: "xlsx" | "csv") => {
+    setExportError("");
+    setExporting(format);
+    try {
+      const meta = { range };
+      if (format === "xlsx") await downloadShipmentReportXlsx(rows, meta);
+      else downloadShipmentReportCsv(rows, meta);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Export failed.");
+    } finally {
+      setExporting(null);
     }
-    setIsPrinting(true);
   };
 
+  const exportDisabled = rows.length === 0 || invalidRange || exporting !== null;
+
   return (
-    <Card title="Monthly Summary Report">
+    <Card title="Shipment Report">
       <div className="report-card-body">
         <div className="report-filter-grid">
+          <label className="field">
+            <span>Period</span>
+            <select value={preset} onChange={(e) => setPreset(e.target.value as ReportPeriodPreset)}>
+              {REPORT_PERIOD_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          {preset === "month" && (
+            <label className="field">
+              <span>Month</span>
+              <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+            </label>
+          )}
+          {preset === "custom" && (
+            <>
+              <label className="field">
+                <span>Start date</span>
+                <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>End date</span>
+                <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
+              </label>
+            </>
+          )}
           <label className="field">
             <span>Company</span>
             <select value={customer} onChange={(e) => setCustomer(e.target.value)}>
               <option value="">All companies</option>
-              {uniqueCustomers.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            <span>Start date</span>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>End date</span>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>Invoice status</span>
-            <select value={invoiceStatus} onChange={(e) => setInvoiceStatus(e.target.value)}>
-              <option value="">All statuses</option>
-              {(["Draft", "Sent", "Pending", "Partially Paid", "Paid", "Overdue", "Cancelled"] as const).map((status) => (
-                <option key={status} value={status}>{status}</option>
-              ))}
+              {customers.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
         </div>
 
+        <div className="report-summary" aria-label="Report totals">
+          <div><span>Shipments</span><strong>{rows.length}</strong></div>
+          <div><span>Company total</span><strong>{money(totals.companyTotal ?? 0)}</strong></div>
+          <div><span>Driver total</span><strong>{money(totals.driverTotal ?? 0)}</strong></div>
+          <div><span>Net profit</span><strong>{money(totals.netProfit ?? 0)}</strong></div>
+        </div>
+
         <div className="report-preview">
           <div className="report-preview-header">
-            <strong>Report preview</strong>
-            <span>{filteredShipments.length} shipment{filteredShipments.length === 1 ? "" : "s"}</span>
+            <strong>{label}</strong>
+            <span>
+              {invalidRange
+                ? "Start date is after end date."
+                : `${rows.length} shipment${rows.length === 1 ? "" : "s"} · all statuses · exports include every report column`}
+            </span>
           </div>
           <div className="table-scroll">
             <table>
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Reference</th>
-                  <th>Company</th>
+                  <th>Shipment No</th>
+                  <th>Customer</th>
                   <th>Route</th>
-                  <th className="num">Company Total</th>
+                  <th>Driver</th>
+                  <th>Vehicle</th>
                   <th>Status</th>
+                  <th className="num">Company Total</th>
+                  <th className="num">Driver Total</th>
+                  <th className="num">Net Profit</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredShipments.slice(0, 20).map((shipment) => (
-                  <tr key={shipment.id}>
-                    <td className="num">{formatDate(shipment.date || shipment.shipmentDate || "")}</td>
-                    <td><span className="invoice-cell">{shipment.invoice || shipment.invoiceReference || shipment.sr}</span></td>
-                    <td>{shipment.customer}</td>
-                    <td>{shipment.loadingPoint} → {shipment.destination}</td>
-                    <td className="num">{money(shipment.companyTotal)}</td>
-                    <td><StatusBadge status={shipment.invoiceStatus} /></td>
+                {rows.map((row) => (
+                  <tr key={`${row.serial}-${row.shipmentNo}`}>
+                    <td className="num">{row.date ? formatDate(row.date) : "-"}</td>
+                    <td>{row.shipmentNo}</td>
+                    <td>{row.customer}</td>
+                    <td>{row.loadingPoint} → {row.destination}</td>
+                    <td>{row.driverName}</td>
+                    <td>{row.vehicleNo}</td>
+                    <td>{row.shipmentStatus}</td>
+                    <td className="num">{money(row.companyTotal)}</td>
+                    <td className="num">{money(row.driverTotal)}</td>
+                    <td className="num">{money(row.netProfit)}</td>
                   </tr>
                 ))}
-                {filteredShipments.length === 0 && (
-                  <tr><td colSpan={6}><div className="empty-state">No shipments match the selected report filters.</div></td></tr>
+                {rows.length === 0 && (
+                  <tr><td colSpan={10}><div className="empty-state">No shipments in this period.</div></td></tr>
                 )}
               </tbody>
             </table>
           </div>
-          {filteredShipments.length > 20 && (
-            <div className="report-preview-header"><span>Showing 20 of {filteredShipments.length} shipments in the preview. The export includes the full filtered set.</span></div>
-          )}
         </div>
 
+        {exportError && <p className="form-error" role="alert">{exportError}</p>}
         <div className="report-actions">
-          <button className="btn-primary" onClick={handleExportPdf}><FileDown size={16} /> Export PDF</button>
+          <button className="btn-ghost" type="button" disabled={exportDisabled} onClick={() => void runExport("csv")}>
+            <FileText size={16} /> {exporting === "csv" ? "Exporting…" : "Export CSV"}
+          </button>
+          <button className="btn-primary" type="button" disabled={exportDisabled} onClick={() => void runExport("xlsx")}>
+            <FileSpreadsheet size={16} /> {exporting === "xlsx" ? "Exporting…" : "Export Excel"}
+          </button>
         </div>
       </div>
-
-      {isPrinting && createPortal(
-        <div className="modal-backdrop">
-          <MonthlySummaryPrintTemplate
-            shipments={filteredShipments}
-            customerName={customer}
-            dateRange={`${startDate} - ${endDate}`.replace(/^ - $|^ -|- $/g, "") || "All Time"}
-            invoiceStatus={invoiceStatus}
-            onClose={() => setIsPrinting(false)}
-          />
-        </div>,
-        document.body
-      )}
     </Card>
   );
 }

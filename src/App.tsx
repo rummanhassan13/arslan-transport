@@ -764,7 +764,7 @@ function DemoApp() {
           />
         )}
         {view === "Reports" && (
-          <ReportsPage shipments={displayShipments} />
+          <ReportsPage shipments={displayShipments} expenses={allExpenses} drivers={drivers} />
         )}
       </main>
 
