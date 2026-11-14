@@ -1,5 +1,6 @@
 import type { Invoice, InvoiceInput, InvoiceItem, InvoiceItemInput, InvoiceUpdateInput } from "../types/domain";
 import { requireSupabaseClient } from "../lib/supabase";
+import { quoteFilterValue } from "./postgrestFilter";
 
 type NamedRelation = { name: string | null } | { name: string | null }[] | null;
 type ShipmentRelation =
@@ -223,7 +224,7 @@ export async function createInvoice(organizationId: string, input: InvoiceInput,
       .is("deleted_at", null);
 
     if (input.shipmentId) {
-      matchQuery = matchQuery.or(`shipment_id.eq.${input.shipmentId},invoice_number.eq.${input.invoiceNumber}`);
+      matchQuery = matchQuery.or(`shipment_id.eq.${quoteFilterValue(input.shipmentId)},invoice_number.eq.${quoteFilterValue(String(input.invoiceNumber))}`);
     } else {
       matchQuery = matchQuery.eq("invoice_number", input.invoiceNumber);
     }

@@ -124,7 +124,10 @@ async function assertMembership(supabase: ReturnType<typeof createClient>, organ
     .eq("status", "active")
     .maybeSingle();
 
-  if (error) throw new FunctionError("ORG_ACCESS_CHECK_FAILED", `Unable to verify organization access: ${error.message}`, 500);
+  if (error) {
+    console.error("Organization access check failed", error);
+    throw new FunctionError("ORG_ACCESS_CHECK_FAILED", "Unable to verify organization access.", 500);
+  }
   if (!data) throw new FunctionError("ORG_ACCESS_DENIED", "You do not have access to this organization.", 403);
 }
 
@@ -141,7 +144,10 @@ async function assertShipmentBelongsToOrganization(
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (error) throw new FunctionError("SHIPMENT_CHECK_FAILED", `Unable to verify shipment: ${error.message}`, 500);
+  if (error) {
+    console.error("Shipment check failed", error);
+    throw new FunctionError("SHIPMENT_CHECK_FAILED", "Unable to verify shipment.", 500);
+  }
   if (!data) throw new FunctionError("SHIPMENT_NOT_FOUND", "Attachment shipment was not found for this organization.", 404);
 }
 
@@ -180,7 +186,10 @@ Deno.serve(async (req) => {
       .eq("id", attachmentId)
       .is("deleted_at", null)
       .maybeSingle();
-    if (error) throw new FunctionError("ATTACHMENT_LOAD_FAILED", `Unable to load attachment metadata: ${error.message}`, 500);
+    if (error) {
+      console.error("Attachment metadata load failed", error);
+      throw new FunctionError("ATTACHMENT_LOAD_FAILED", "Unable to load attachment details.", 500);
+    }
     if (!data) throw new FunctionError("ATTACHMENT_NOT_FOUND", "Attachment not found.", 404);
 
     const metadata = data as {
@@ -206,17 +215,23 @@ Deno.serve(async (req) => {
     const bucketName = required("R2_BUCKET_NAME", "R2_CONFIG_MISSING", "R2 configuration is missing.");
     const expiresAt = new Date(Date.now() + downloadExpirySeconds * 1000).toISOString();
 
-    const isImage = metadata.file_type && ["image/jpeg", "image/png", "image/webp"].includes(metadata.file_type);
+    const fileType = metadata.file_type ?? "";
+    const isImage = ["image/jpeg", "image/png", "image/webp"].includes(fileType);
+    // Only photos and PDFs may be shown in the browser; anything else is always downloaded
+    // as a plain file, so a mislabelled upload can never run as a web page.
+    const isViewable = isImage || fileType === "application/pdf";
     const requestedDisposition = body.response_disposition ?? body.responseDisposition;
-    const disposition = requestedDisposition === "inline" || requestedDisposition === "attachment"
-      ? requestedDisposition
-      : isImage ? "inline" : "attachment";
-    const safeName = metadata.file_name ? metadata.file_name.replace(/["\\]/g, "") : "attachment";
+    const disposition = !isViewable
+      ? "attachment"
+      : requestedDisposition === "inline" || requestedDisposition === "attachment"
+        ? requestedDisposition
+        : isImage ? "inline" : "attachment";
+    const safeName = metadata.file_name ? metadata.file_name.replace(/["\\\r\n]/g, "") : "attachment";
     const getObjectParams: any = {
       Bucket: bucketName,
       Key: objectKey,
       ResponseContentDisposition: `${disposition}; filename="${safeName}"`,
-      ...(metadata.file_type ? { ResponseContentType: metadata.file_type } : {}),
+      ResponseContentType: isViewable ? fileType : "application/octet-stream",
     };
 
     const command = new GetObjectCommand(getObjectParams);
