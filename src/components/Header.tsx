@@ -9,7 +9,15 @@ import { useAuth } from "../hooks/useAuth";
 import { useCurrency } from "../hooks/useCurrency";
 import type { CurrencyCode } from "../constants/currencies";
 import type { CompanyProfileSettings, InvoiceSettings } from "../contexts/BusinessSettingsContext";
-import { EmptyState, Modal, StatusBadge } from "./ui";
+import { Modal, StatusBadge } from "./ui";
+import {
+  APPROVABLE_ROLES,
+  approveAccessRequest,
+  listPendingAccessRequests,
+  rejectAccessRequest,
+  type AccessRequest,
+  type ApprovableRole,
+} from "../services/accessRequestService";
 
 const PROFILE_ITEMS = ["Business Profile", "Invoice Settings", "User & Roles", "Billing & Plan"] as const;
 export type ProfileItem = (typeof PROFILE_ITEMS)[number];
@@ -634,6 +642,8 @@ function CompanyProfilePanel({ orgName, onClose }: { orgName: string; onClose: (
 
 function UserRolesPanel({ onClose }: { onClose: () => void }) {
   const roles = ["Owner", "Admin", "Manager", "Accountant", "Dispatcher", "Viewer"];
+  const { role } = useAuth();
+  const canReviewRequests = !env.demoMode && (role === "owner" || role === "admin");
 
   return (
     <div className="settings-panel">
@@ -641,8 +651,9 @@ function UserRolesPanel({ onClose }: { onClose: () => void }) {
         <span className="settings-panel-icon">
           <UsersRound size={18} />
         </span>
-        <p>Roles define access boundaries. Invite and member management will be connected after the pilot admin flow.</p>
+        <p>Roles define access boundaries. New people request access from the sign-in page; an owner or admin approves them here and picks their role.</p>
       </div>
+      {canReviewRequests && <AccessRequestsSection />}
       <div className="role-list">
         {roles.map((role) => (
           <div key={role} className="role-row">
@@ -651,9 +662,111 @@ function UserRolesPanel({ onClose }: { onClose: () => void }) {
           </div>
         ))}
       </div>
-      <EmptyState text="User invitation and member management are not enabled yet." />
       <div className="settings-actions">
         <button className="btn-primary" onClick={onClose}>Done</button>
+      </div>
+    </div>
+  );
+}
+
+const ROLE_LABELS: Record<ApprovableRole, string> = {
+  viewer: "Viewer (read only)",
+  dispatcher: "Dispatcher",
+  accountant: "Accountant",
+  manager: "Manager",
+  admin: "Admin",
+};
+
+function AccessRequestsSection() {
+  const { role, activeOrganization } = useAuth();
+  const [requests, setRequests] = useState<AccessRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [chosenRoles, setChosenRoles] = useState<Record<string, ApprovableRole>>({});
+  // Only an owner may hand out the admin role (enforced in the database too).
+  const roleOptions = APPROVABLE_ROLES.filter((option) => option !== "admin" || role === "owner");
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setRequests(await listPendingAccessRequests());
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load access requests.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const review = async (request: AccessRequest, decision: "approve" | "reject") => {
+    if (!activeOrganization) return;
+    const chosenRole = chosenRoles[request.id] ?? "viewer";
+    const who = request.fullName || request.email;
+    const question = decision === "approve"
+      ? `Give ${who} access to ${activeOrganization.name} as ${ROLE_LABELS[chosenRole]}?`
+      : `Reject the access request from ${who}?`;
+    if (!window.confirm(question)) return;
+
+    setBusyId(request.id);
+    setError("");
+    try {
+      if (decision === "approve") await approveAccessRequest(request.id, activeOrganization.id, chosenRole);
+      else await rejectAccessRequest(request.id);
+      setRequests((current) => current.filter((item) => item.id !== request.id));
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Unable to update the request.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="access-requests">
+      <div className="access-requests-head">
+        <strong>Access requests</strong>
+        <button className="table-action" type="button" onClick={() => void load()} disabled={loading}>
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+      {error && <p className="form-error">{error}</p>}
+      {!loading && !error && requests.length === 0 && <p className="muted-note">No one is waiting for approval.</p>}
+      <div className="role-list">
+        {requests.map((request) => (
+          <div key={request.id} className="access-request-row">
+            <div className="access-request-info">
+              <strong>{request.fullName || request.email}</strong>
+              <span>{request.email}</span>
+              {(request.companyName || request.phone) && (
+                <span>{[request.companyName, request.phone].filter(Boolean).join(" · ")}</span>
+              )}
+              {request.message && <span className="access-request-message">{request.message}</span>}
+              <span>Requested {new Date(request.createdAt).toLocaleString()}</span>
+            </div>
+            <div className="access-request-actions">
+              <select
+                aria-label={`Role for ${request.email}`}
+                value={chosenRoles[request.id] ?? "viewer"}
+                onChange={(event) => setChosenRoles((current) => ({ ...current, [request.id]: event.target.value as ApprovableRole }))}
+                disabled={busyId === request.id}
+              >
+                {roleOptions.map((option) => (
+                  <option key={option} value={option}>{ROLE_LABELS[option]}</option>
+                ))}
+              </select>
+              <button className="btn-primary" type="button" onClick={() => void review(request, "approve")} disabled={busyId === request.id}>
+                Approve
+              </button>
+              <button className="btn-ghost" type="button" onClick={() => void review(request, "reject")} disabled={busyId === request.id}>
+                Reject
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -171,6 +171,9 @@ Deno.serve(async (req) => {
     }
 
     const table = body.table ?? "shipment_attachments";
+    if (table !== "shipment_attachments" && table !== "expense_attachments") {
+      throw new FunctionError("INVALID_TABLE", "Unsupported attachment table.", 400);
+    }
     const { data, error } = await supabase
       .from(table)
       .select(table === "shipment_attachments" ? "organization_id, shipment_id, storage_key, file_name, file_type" : "organization_id, shipment_id, object_key, file_name, file_type")
@@ -191,6 +194,11 @@ Deno.serve(async (req) => {
     const organizationId = metadata.organization_id;
     const objectKey = table === "shipment_attachments" ? metadata.storage_key : metadata.object_key;
     if (!objectKey) throw new FunctionError("STORAGE_KEY_MISSING", "Attachment storage key is missing.", 400);
+    // The stored path must sit inside the attachment's own organization folder. Otherwise a
+    // row could point at another organization's file and this function would sign it.
+    if (!objectKey.startsWith(`organizations/${organizationId}/`)) {
+      throw new FunctionError("ATTACHMENT_NOT_FOUND", "Attachment not found.", 404);
+    }
 
     await assertMembership(supabase, organizationId, user.id);
     await assertShipmentBelongsToOrganization(supabase, organizationId, metadata.shipment_id);
