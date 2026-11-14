@@ -1,0 +1,130 @@
+# Nightly backup of the Supabase database and the R2 attachment files.
+#
+# What it does every night:
+#   1. Saves a full copy of the database (roles, structure, data), packs it and locks it
+#      with BACKUP_PASSPHRASE, then stores it in the backup bucket under database/.
+#   2. Copies any new attachment files from the main bucket into the backup bucket under
+#      files/. It only ever ADDS files: nothing is deleted or overwritten in the backup.
+#   3. Deletes database copies older than 35 days (attachment files are kept forever).
+#
+# Until the secrets are added (see docs/operations/BACKUP_AND_RESTORE.md) it does nothing
+# and finishes successfully. If a night fails, GitHub emails the repository owner.
+
+name: Nightly backup
+
+on:
+  schedule:
+    - cron: "30 21 * * *" # 21:30 UTC = 01:30 in the UAE, 02:30 in Pakistan
+  workflow_dispatch: {} # "Run workflow" button for a manual backup
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      R2_SOURCE_BUCKET: ${{ secrets.R2_SOURCE_BUCKET }}
+      R2_BACKUP_BUCKET: ${{ secrets.R2_BACKUP_BUCKET }}
+      # rclone reads its storage settings from these variables ("main" and "backup").
+      RCLONE_CONFIG_MAIN_TYPE: s3
+      RCLONE_CONFIG_MAIN_PROVIDER: Cloudflare
+      RCLONE_CONFIG_MAIN_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      RCLONE_CONFIG_MAIN_ACCESS_KEY_ID: ${{ secrets.R2_SOURCE_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_MAIN_SECRET_ACCESS_KEY: ${{ secrets.R2_SOURCE_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_MAIN_NO_CHECK_BUCKET: "true"
+      RCLONE_CONFIG_BACKUP_TYPE: s3
+      RCLONE_CONFIG_BACKUP_PROVIDER: Cloudflare
+      RCLONE_CONFIG_BACKUP_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      RCLONE_CONFIG_BACKUP_ACCESS_KEY_ID: ${{ secrets.R2_BACKUP_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_BACKUP_SECRET_ACCESS_KEY: ${{ secrets.R2_BACKUP_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_BACKUP_NO_CHECK_BUCKET: "true"
+
+    steps:
+      - name: Check the backup is set up
+        id: setup
+        run: |
+          missing=""
+          total=0
+          count=0
+          for name in SUPABASE_DB_URL BACKUP_PASSPHRASE R2_SOURCE_BUCKET R2_BACKUP_BUCKET \
+                      RCLONE_CONFIG_MAIN_ENDPOINT RCLONE_CONFIG_MAIN_ACCESS_KEY_ID RCLONE_CONFIG_MAIN_SECRET_ACCESS_KEY \
+                      RCLONE_CONFIG_BACKUP_ACCESS_KEY_ID RCLONE_CONFIG_BACKUP_SECRET_ACCESS_KEY; do
+            total=$((total + 1))
+            if [ -z "${!name}" ]; then missing="$missing $name"; count=$((count + 1)); fi
+          done
+          if [ "$count" -eq "$total" ]; then
+            echo "::notice::Backups are not set up yet (no secrets). Nothing to do."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$missing" ]; then
+            echo "::error::Some backup secrets are missing:$missing"
+            exit 1
+          fi
+          if [ "${#BACKUP_PASSPHRASE}" -lt 16 ]; then
+            echo "::error::BACKUP_PASSPHRASE must be at least 16 characters."
+            exit 1
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install tools
+        if: steps.setup.outputs.ready == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rclone gnupg
+
+      - name: Install Supabase CLI
+        if: steps.setup.outputs.ready == 'true'
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Back up the database
+        if: steps.setup.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          stamp="$(date -u +%Y-%m-%d_%H%M)"
+          workdir="$RUNNER_TEMP/db-$stamp"
+          mkdir -p "$workdir"
+
+          supabase db dump --db-url "$SUPABASE_DB_URL" -f "$workdir/roles.sql" --role-only
+          supabase db dump --db-url "$SUPABASE_DB_URL" -f "$workdir/schema.sql"
+          supabase db dump --db-url "$SUPABASE_DB_URL" -f "$workdir/data.sql" --use-copy --data-only
+
+          for f in roles.sql schema.sql data.sql; do
+            if [ ! -s "$workdir/$f" ]; then echo "::error::$f is empty - the database copy failed."; exit 1; fi
+          done
+          echo "Database copy sizes:"; ls -lh "$workdir"
+
+          archive="$RUNNER_TEMP/database-$stamp.tar.gz.gpg"
+          tar -C "$workdir" -czf - roles.sql schema.sql data.sql \
+            | gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 \
+                  --passphrase "$BACKUP_PASSPHRASE" -o "$archive"
+          rm -rf "$workdir"
+
+          rclone copyto "$archive" "backup:$R2_BACKUP_BUCKET/database/database-$stamp.tar.gz.gpg"
+          echo "::notice::Database backup saved as database/database-$stamp.tar.gz.gpg"
+
+      - name: Copy new attachment files
+        if: steps.setup.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          # --ignore-existing: a file already in the backup is never overwritten.
+          rclone copy "main:$R2_SOURCE_BUCKET" "backup:$R2_BACKUP_BUCKET/files" \
+            --ignore-existing --transfers 8 --stats-one-line --stats 30s
+          echo "Files in backup:"; rclone size "backup:$R2_BACKUP_BUCKET/files"
+
+      - name: Remove database copies older than 35 days
+        if: steps.setup.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          rclone delete "backup:$R2_BACKUP_BUCKET/database" --min-age 35d
+          echo "Database copies kept:"; rclone lsf "backup:$R2_BACKUP_BUCKET/database" | sort | tail -n 40

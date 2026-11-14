@@ -1,0 +1,115 @@
+# Proves the backups work: loads the newest database backup into a SEPARATE, EMPTY
+# Supabase project (RESTORE_DB_URL) and prints how many rows each main table has.
+#
+# Run it by hand from the Actions tab ("Test restore" -> "Run workflow"). It refuses to run
+# against the live project, and only runs when you type RESTORE TEST in the box.
+# See docs/operations/BACKUP_AND_RESTORE.md.
+
+name: Test restore
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type RESTORE TEST to load the newest backup into the TEST project'
+        required: true
+        default: ""
+      backup_file:
+        description: "Optional: a backup file name from database/ (leave empty for the newest)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      RESTORE_DB_URL: ${{ secrets.RESTORE_DB_URL }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      R2_BACKUP_BUCKET: ${{ secrets.R2_BACKUP_BUCKET }}
+      RCLONE_CONFIG_BACKUP_TYPE: s3
+      RCLONE_CONFIG_BACKUP_PROVIDER: Cloudflare
+      RCLONE_CONFIG_BACKUP_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      RCLONE_CONFIG_BACKUP_ACCESS_KEY_ID: ${{ secrets.R2_BACKUP_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_BACKUP_SECRET_ACCESS_KEY: ${{ secrets.R2_BACKUP_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_BACKUP_NO_CHECK_BUCKET: "true"
+
+    steps:
+      - name: Safety checks
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$CONFIRM" != "RESTORE TEST" ]; then
+            echo "::error::Type RESTORE TEST in the confirm box to run this."; exit 1
+          fi
+          for name in RESTORE_DB_URL SUPABASE_DB_URL BACKUP_PASSPHRASE R2_BACKUP_BUCKET \
+                      RCLONE_CONFIG_BACKUP_ENDPOINT RCLONE_CONFIG_BACKUP_ACCESS_KEY_ID RCLONE_CONFIG_BACKUP_SECRET_ACCESS_KEY; do
+            if [ -z "${!name}" ]; then echo "::error::Secret missing: $name"; exit 1; fi
+          done
+          # The user name in a Supabase pooler address is "postgres.<project-id>".
+          live_user="$(printf '%s' "$SUPABASE_DB_URL" | sed -E 's#^[a-z]+://([^:@/]+).*#\1#')"
+          test_user="$(printf '%s' "$RESTORE_DB_URL" | sed -E 's#^[a-z]+://([^:@/]+).*#\1#')"
+          live_host="$(printf '%s' "$SUPABASE_DB_URL" | sed -E 's#^.*@([^:/]+).*#\1#')"
+          test_host="$(printf '%s' "$RESTORE_DB_URL" | sed -E 's#^.*@([^:/]+).*#\1#')"
+          if [ "$live_user@$live_host" = "$test_user@$test_host" ] || printf '%s' "$RESTORE_DB_URL" | grep -q "golhuycibplkcdokxshp"; then
+            echo "::error::RESTORE_DB_URL points at the LIVE project. Refusing to restore."; exit 1
+          fi
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rclone gnupg postgresql-common
+          # Newest PostgreSQL client, so it can read dumps from any Supabase Postgres version.
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Download and unlock the backup
+        env:
+          BACKUP_FILE: ${{ inputs.backup_file }}
+        run: |
+          set -euo pipefail
+          file="$BACKUP_FILE"
+          if [ -z "$file" ]; then
+            file="$(rclone lsf "backup:$R2_BACKUP_BUCKET/database" | sort | tail -n 1)"
+          fi
+          if [ -z "$file" ]; then echo "::error::No database backups found."; exit 1; fi
+          echo "::notice::Restoring $file"
+          mkdir -p "$RUNNER_TEMP/restore"
+          rclone copyto "backup:$R2_BACKUP_BUCKET/database/$file" "$RUNNER_TEMP/backup.tar.gz.gpg"
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" \
+              -d "$RUNNER_TEMP/backup.tar.gz.gpg" | tar -C "$RUNNER_TEMP/restore" -xzf -
+          ls -lh "$RUNNER_TEMP/restore"
+
+      - name: Load it into the test project
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/restore"
+          psql --single-transaction --variable ON_ERROR_STOP=1 \
+            --file roles.sql \
+            --file schema.sql \
+            --command 'SET session_replication_role = replica' \
+            --file data.sql \
+            --dbname "$RESTORE_DB_URL"
+
+      - name: Count rows (compare with the live app)
+        run: |
+          psql "$RESTORE_DB_URL" --no-psqlrc -A -F ' | ' -c "
+            select 'organizations' as table_name, count(*) from public.organizations
+            union all select 'members', count(*) from public.organization_members
+            union all select 'login accounts', count(*) from auth.users
+            union all select 'clients', count(*) from public.clients
+            union all select 'drivers', count(*) from public.drivers
+            union all select 'vehicles', count(*) from public.vehicles
+            union all select 'shipments', count(*) from public.shipments
+            union all select 'expenses', count(*) from public.shipment_expenses
+            union all select 'invoices', count(*) from public.invoices
+            union all select 'client payments', count(*) from public.client_payments
+            union all select 'driver payments', count(*) from public.driver_payments
+            union all select 'attachments', count(*) from public.shipment_attachments;"
+          echo "::notice::Restore worked. Compare these numbers with the live app, then you can pause or delete the test project."
