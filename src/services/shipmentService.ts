@@ -1,4 +1,5 @@
 import { requireSupabaseClient } from "../lib/supabase";
+import { ilikeContains } from "./postgrestFilter";
 import type { Shipment, ShipmentFilters, ShipmentInput, ShipmentUpdateInput } from "../types/domain";
 import { calculate } from "../utils/calculations";
 
@@ -292,7 +293,10 @@ export async function listShipments(organizationId: string, filters: ShipmentLis
     if (filters.dateFrom) query = query.gte("shipment_date", filters.dateFrom);
     if (filters.dateTo) query = query.lte("shipment_date", filters.dateTo);
     if (filters.destination) query = query.ilike("destination", `%${filters.destination}%`);
-    if (filters.search) query = query.or(`invoice_reference.ilike.%${filters.search}%,shipment_no.ilike.%${filters.search}%,loading_point.ilike.%${filters.search}%,destination.ilike.%${filters.search}%`);
+    if (filters.search) {
+      const search = filters.search;
+      query = query.or(["invoice_reference", "shipment_no", "loading_point", "destination"].map((column) => ilikeContains(column, search)).join(","));
+    }
     return query;
   };
 

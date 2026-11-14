@@ -182,7 +182,10 @@ async function getMembership(supabase: ReturnType<typeof createClient>, organiza
     .eq("status", "active")
     .maybeSingle();
 
-  if (error) throw new FunctionError("ORG_ACCESS_CHECK_FAILED", `Unable to verify organization access: ${error.message}`, 500);
+  if (error) {
+    console.error("Organization access check failed", error);
+    throw new FunctionError("ORG_ACCESS_CHECK_FAILED", "Unable to verify organization access.", 500);
+  }
   if (!data) throw new FunctionError("ORG_ACCESS_DENIED", "You do not have access to this organization.", 403);
   return data as { id: string; role: string };
 }
@@ -202,7 +205,10 @@ async function assertExpenseBelongsToOrganization(
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (error) throw new FunctionError("EXPENSE_CHECK_FAILED", `Unable to verify expense: ${error.message}`, 500);
+  if (error) {
+    console.error("Expense check failed", error);
+    throw new FunctionError("EXPENSE_CHECK_FAILED", "Unable to verify expense.", 500);
+  }
   if (!data) throw new FunctionError("EXPENSE_NOT_FOUND", "Expense not found for this organization and shipment.", 404);
 }
 
@@ -217,7 +223,10 @@ async function assertShipmentBelongsToOrganization(
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (error) throw new FunctionError("SHIPMENT_CHECK_FAILED", `Unable to verify shipment: ${error.message}`, 500);
+  if (error) {
+    console.error("Shipment check failed", error);
+    throw new FunctionError("SHIPMENT_CHECK_FAILED", "Unable to verify shipment.", 500);
+  }
   if (!data) throw new FunctionError("SHIPMENT_NOT_FOUND", "Shipment not found for this organization.", 404);
   return data as { id: string; organization_id: string };
 }
