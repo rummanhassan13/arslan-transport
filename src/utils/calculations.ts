@@ -10,7 +10,7 @@ import {
   sumMoney,
 } from "../domain/financials";
 
-export { getExpenseActualCost, getExpenseClientBillAmount, getExpenseDisplayAmount, getExpenseDriverPayAmount, getExpenseMarkupProfit } from "../domain/financials";
+export { getExpenseActualCost, getExpenseClientBillAmount, getExpenseDisplayAmount, getExpenseDriverPayAmount, getExpenseMarkupProfit, isServiceChargeExpense } from "../domain/financials";
 
 export type DashboardPeriod = "7D" | "30D" | "QTD" | "YTD";
 
