@@ -18,6 +18,7 @@ import {
   getExpenseClientBillAmount,
   getExpenseDriverPayAmount,
   getExpenseMarkupProfit,
+  isServiceChargeExpense,
 } from "../utils/calculations";
 import { labelize, money } from "../utils/formatters";
 import { EXPENSE_CATEGORIES } from "../constants/expenses";
@@ -177,7 +178,10 @@ export function ExpensesPage({
                     <td className="num">
                       <span className="invoice-cell">{expense.invoiceReference || expense.shipmentNo || "Shipment"}</span>
                     </td>
-                    <td>{labelize(expense.category)}</td>
+                    <td>
+                      {labelize(expense.category)}
+                      {isServiceChargeExpense(expense) && <> <StatusBadge status="Service charge" /></>}
+                    </td>
                     <td className="num">{money(getExpenseActualCost(expense))}</td>
                     <td className="num">{money(getExpenseClientBillAmount(expense))}</td>
                     <td className="num">{money(getExpenseDriverPayAmount(expense))}</td>
@@ -394,6 +398,8 @@ export function ExpenseDialog({
     notes: expense?.notes ?? "",
   });
 
+  // Service charge: billed to the company with no cost to us, so the whole Company Bill is profit (actual cost 0, nothing to the driver).
+  const [serviceCharge, setServiceCharge] = useState(() => Boolean(expense && isServiceChargeExpense(expense)));
   const [saving, setSaving] = useState(false);
   const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -418,14 +424,20 @@ export function ExpenseDialog({
     event.preventDefault();
     setSaving(true);
     setSaveMessage("");
-    const actualCost = Number(form.actualCostAmount === "" ? form.amount : form.actualCostAmount);
-    if (!Number.isFinite(actualCost) || actualCost <= 0) {
-      setSaveMessage("Actual cost must be greater than zero.");
+    const serviceChargeBill = Number(form.clientBillAmount);
+    if (serviceCharge && (form.clientBillAmount === "" || !Number.isFinite(serviceChargeBill) || serviceChargeBill <= 0)) {
+      setSaveMessage("Enter the Company Bill amount for the service charge.");
+      setSaving(false);
+      return;
+    }
+    const actualCost = serviceCharge ? 0 : Number(form.actualCostAmount === "" ? form.amount : form.actualCostAmount);
+    if (!serviceCharge && (!Number.isFinite(actualCost) || actualCost <= 0)) {
+      setSaveMessage("Actual cost must be greater than zero. Tick \"Service charge\" if there is no cost.");
       setSaving(false);
       return;
     }
     // "Pay driver" is added to the driver's total (in addition to the driver rate) and counted as a company cost.
-    const driverPay = form.driverPayAmount === "" ? 0 : Number(form.driverPayAmount);
+    const driverPay = serviceCharge || form.driverPayAmount === "" ? 0 : Number(form.driverPayAmount);
     if (!Number.isFinite(driverPay) || driverPay < 0) {
       setSaveMessage("Pay driver cannot be negative.");
       setSaving(false);
@@ -434,11 +446,12 @@ export function ExpenseDialog({
     // With the billing options hidden, a new expense is billed to the company and put on the invoice; an edit keeps its
     // saved billing. The driver part comes from the Pay driver amount, so new expenses are not flagged driver-reimbursable;
     // an older expense that already was keeps the flag and its driver.
-    const useDefaultTreatment = !SHOW_EXPENSE_BILLING_OPTIONS && !expense;
+    // A service charge is always billed on the invoice and never goes to the driver.
+    const useDefaultTreatment = (!SHOW_EXPENSE_BILLING_OPTIONS && !expense) || serviceCharge;
     const treatment = {
       clientBillable: useDefaultTreatment ? true : Boolean(form.clientBillable),
       includedInInvoice: useDefaultTreatment ? true : Boolean(form.includedInInvoice),
-      driverReimbursable: Boolean(form.driverReimbursable),
+      driverReimbursable: serviceCharge ? false : Boolean(form.driverReimbursable),
     };
     // The driver the amount is added to: the chosen one, else the first-leg driver; none when there is no driver.
     const shipmentAssignmentId = treatment.driverReimbursable
@@ -462,7 +475,7 @@ export function ExpenseDialog({
         category: form.category as ExpenseCategory,
         amount: actualCost,
         actualCostAmount: actualCost,
-        clientBillAmount: Number(form.clientBillAmount === "" ? (form.actualCostAmount === "" ? form.amount : form.actualCostAmount) : form.clientBillAmount),
+        clientBillAmount: serviceCharge ? serviceChargeBill : Number(form.clientBillAmount === "" ? (form.actualCostAmount === "" ? form.amount : form.actualCostAmount) : form.clientBillAmount),
         // A set amount wins over the older reimbursable flag; 0 on a flagged expense is kept as 0 so it adds nothing.
         driverPayAmount: driverPay > 0 ? driverPay : (treatment.driverReimbursable ? 0 : null),
         notes: form.notes?.trim() || null,
@@ -633,6 +646,29 @@ export function ExpenseDialog({
           <span>Expense Date</span>
           <input type="date" value={form.expenseDate} onChange={(event) => setForm((current) => ({ ...current, expenseDate: event.target.value }))} />
         </label>
+        <label className="field checkbox-field form-wide">
+          <input
+            type="checkbox"
+            checked={serviceCharge}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setServiceCharge(checked);
+              // Ticking keeps what was typed as the bill; the cost and driver amounts no longer apply.
+              if (checked) {
+                setForm((current) => ({
+                  ...current,
+                  clientBillAmount: current.clientBillAmount === "" ? current.actualCostAmount : current.clientBillAmount,
+                  amount: "",
+                  actualCostAmount: "",
+                  driverPayAmount: "",
+                  driverReimbursable: false,
+                  shipmentAssignmentId: null,
+                }));
+              }
+            }}
+          />
+          <span>Service charge: no cost to us, the full Company Bill is profit</span>
+        </label>
         <div className="form-wide expense-amount-row">
           <label className="field">
             <span>Actual Cost</span>
@@ -640,7 +676,9 @@ export function ExpenseDialog({
               type="number"
               min="0"
               step="0.01"
-              value={form.actualCostAmount === "" ? "" : (form.actualCostAmount ?? form.amount)}
+              disabled={serviceCharge}
+              placeholder={serviceCharge ? "0 (service charge)" : undefined}
+              value={serviceCharge ? "" : form.actualCostAmount === "" ? "" : (form.actualCostAmount ?? form.amount)}
               onChange={(event) => {
                 const nextAmount = event.target.value === "" ? "" : Number(event.target.value);
                 setForm((current) => ({
@@ -664,6 +702,7 @@ export function ExpenseDialog({
               type="number"
               min="0"
               step="0.01"
+              required={serviceCharge}
               value={form.clientBillAmount === "" ? "" : (form.clientBillAmount ?? form.actualCostAmount ?? form.amount)}
               onChange={(event) => setForm((current) => ({ ...current, clientBillAmount: event.target.value === "" ? "" : Number(event.target.value) }))}
             />
@@ -675,7 +714,8 @@ export function ExpenseDialog({
               min="0"
               step="0.01"
               title="Added to the driver's total, on top of the driver rate"
-              value={form.driverPayAmount}
+              disabled={serviceCharge}
+              value={serviceCharge ? "" : form.driverPayAmount}
               onChange={(event) => setForm((current) => ({ ...current, driverPayAmount: event.target.value === "" ? "" : Number(event.target.value) }))}
             />
           </label>

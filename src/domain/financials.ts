@@ -114,6 +114,11 @@ export function getExpenseDisplayAmount(expense: ShipmentExpense): number {
   return expense.clientBillable ? getExpenseClientBillAmount(expense) : getExpenseActualCost(expense);
 }
 
+/** A service charge is billed to the company with no actual cost and nothing paid to the driver: all of it is profit. */
+export function isServiceChargeExpense(expense: ShipmentExpense): boolean {
+  return getExpenseActualCost(expense) === 0 && getExpenseDriverPayAmount(expense) === 0 && getExpenseClientBillAmount(expense) > 0;
+}
+
 export function getExpenseMarkupProfit(expense: ShipmentExpense): number {
   return roundMoney(getExpenseClientBillAmount(expense) - getExpenseActualCost(expense));
 }
