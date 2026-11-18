@@ -5,6 +5,7 @@ import {
   calculateShipmentProjection,
   getExpenseDisplayAmount,
   getExpenseDriverPayAmount,
+  isServiceChargeExpense,
   moneyToMinor,
   roundMoney,
   signedClientPaymentAmount,
@@ -159,6 +160,33 @@ describe("expense display amount", () => {
 
   it("shows the actual cost for expenses not billed to the company", () => {
     expect(getExpenseDisplayAmount(expense({ clientBillable: false, actualCostAmount: 100, clientBillAmount: 150 }))).toBe(100);
+  });
+});
+
+describe("service charge expenses", () => {
+  const serviceCharge = expense({
+    category: "fashah",
+    amount: 0,
+    actualCostAmount: 0,
+    clientBillAmount: 250,
+    clientBillable: true,
+    includedInInvoice: true,
+    driverPayAmount: null,
+  });
+
+  it("is recognised only when there is no cost, no driver pay and a bill", () => {
+    expect(isServiceChargeExpense(serviceCharge)).toBe(true);
+    expect(isServiceChargeExpense(expense({ clientBillable: true }))).toBe(false);
+    expect(isServiceChargeExpense({ ...serviceCharge, driverPayAmount: 50 })).toBe(false);
+  });
+
+  it("adds the whole bill to revenue and profit, nothing to cost or the driver", () => {
+    const result = calculateShipmentProjection(shipment(), [serviceCharge]);
+    expect(result.estimatedClientRevenue).toBe(1250);
+    expect(result.invoiceReadyRevenue).toBe(1250);
+    expect(result.totalCost).toBe(600);
+    expect(result.estimatedProfit).toBe(650);
+    expect(result.driverBalance).toBe(600);
   });
 });
 
