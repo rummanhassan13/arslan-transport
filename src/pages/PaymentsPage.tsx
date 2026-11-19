@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Search, Trash2, X } from "lucide-react";
 import type { ClientPayment, DriverPayment, Invoice, Shipment } from "../types/domain";
 import { formatDate, money, labelize } from "../utils/formatters";
 import { EmptyState, KpiGrid, PageTitle, StatusBadge, DataTable } from "../components/ui";
@@ -38,6 +38,15 @@ export function PaymentsPage({
   embedded?: boolean;
 }) {
   const [tab, setTab] = useState<"Company Receivables" | "Driver Payouts">("Company Receivables");
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLowerCase();
+  const matches = (...values: (string | null | undefined)[]) =>
+    !query || values.some((value) => (value ?? "").toLowerCase().includes(query));
+  const shipmentById = new Map(shipments.map((shipment) => [shipment.id, shipment]));
+  const invoiceById = new Map(invoices.map((invoice) => [invoice.id, invoice]));
+  /** The shipment reference shown everywhere else in the app (invoice reference, else shipment number). */
+  const shipmentLabel = (shipmentId: string | null, fallback?: string | null) =>
+    (shipmentId ? shipmentById.get(shipmentId)?.invoice : undefined) || fallback || "-";
   const invoiceRows = invoices.length ? invoices : [];
   const paidByInvoice = new Map<string, number>();
   clientPayments.forEach((payment) => {
@@ -50,6 +59,24 @@ export function PaymentsPage({
   const outstanding = sumMoney(invoiceBalances.map((balance) => balance.balance));
   const overdue = sumMoney(invoiceBalances.filter((balance) => balance.overdue).map((balance) => balance.balance));
   const driverPayables = sumMoney(shipments.map((shipment) => shipment.pending));
+
+  const visibleInvoiceRows = invoiceRows.filter((row) =>
+    matches(row.invoiceNumber, row.clientName, row.clientSnapshot.name as string | undefined, shipmentLabel(row.shipmentId, row.shipmentReference)),
+  );
+  const visibleShipmentRows = shipments.filter((row) => matches(row.invoice, row.customer));
+  const visibleClientPayments = clientPayments.filter((payment) => {
+    const invoice = invoiceById.get(payment.invoiceId);
+    return matches(
+      payment.invoiceNumber ?? invoice?.invoiceNumber,
+      shipmentLabel(payment.shipmentId ?? invoice?.shipmentId ?? null, payment.shipmentReference),
+      payment.clientName ?? invoice?.clientName,
+      payment.referenceNo,
+    );
+  });
+  const visibleDriverRows = shipments.filter((row) => matches(row.invoice, row.driverName));
+  const visibleDriverPayments = driverPayments.filter((payment) =>
+    matches(shipmentLabel(payment.shipmentId, payment.shipmentReference), payment.driverName, payment.referenceNo),
+  );
   return (
     <>
       {embedded ? (
@@ -82,12 +109,30 @@ export function PaymentsPage({
           ["Driver Payables", money(driverPayables), "Open driver settlement balance"],
         ]}
       />
-      <div className="period">
-        {["Company Receivables", "Driver Payouts"].map((item) => (
-          <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item as typeof tab)}>
-            {item}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="period">
+          {["Company Receivables", "Driver Payouts"].map((item) => (
+            <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item as typeof tab)}>
+              {item}
+            </button>
+          ))}
+        </div>
+        <div className="table-filters">
+          <div className="compact-search">
+            <Search size={14} />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={tab === "Company Receivables" ? "Search invoice, shipment, company..." : "Search shipment, driver..."}
+              aria-label="Search payments"
+            />
+          </div>
+          {search && (
+            <button className="icon-btn text-ink-3 hover:text-ink" onClick={() => setSearch("")} title="Clear search" type="button">
+              <X size={15} />
+            </button>
+          )}
+        </div>
       </div>
       {error && <div className="form-error">{error}</div>}
       {tab === "Company Receivables" ? (
@@ -98,7 +143,7 @@ export function PaymentsPage({
               <h3>Company receivables ledger</h3>
               <p>Invoice-level receivables grouped by company context.</p>
             </div>
-            <span className="status num">{invoiceRows.length || shipments.length} rows</span>
+            <span className="status num">{invoiceRows.length ? visibleInvoiceRows.length : visibleShipmentRows.length} rows</span>
           </div>
           <div className="table-scroll">
             <table>
@@ -115,7 +160,7 @@ export function PaymentsPage({
                 </tr>
               </thead>
               <tbody>
-                {invoiceRows.length ? invoiceRows.map((row) => {
+                {invoiceRows.length ? visibleInvoiceRows.map((row) => {
                   const balance = calculateInvoiceBalance(row, clientPayments);
                   const paid = balance.paid;
                   const pending = balance.balance;
@@ -141,7 +186,7 @@ export function PaymentsPage({
                       </td>
                     </tr>
                   );
-                }) : shipments.map((row) => {
+                }) : visibleShipmentRows.map((row) => {
                   const pending = row.clientBalance ?? row.companyTotal;
                   return (
                     <tr key={row.id}>
@@ -160,16 +205,22 @@ export function PaymentsPage({
             </table>
             {loading && <EmptyState text="Loading payments..." />}
             {!loading && !invoiceRows.length && !shipments.length && <EmptyState text="No company receivables yet." />}
+            {!loading && query && (invoiceRows.length ? !visibleInvoiceRows.length : shipments.length > 0 && !visibleShipmentRows.length) && (
+              <EmptyState text="No receivables match the current search." />
+            )}
           </div>
         </div>
         <div className="mt-6">
           <DataTable
             title="Company Payments History"
-            columns={["Date", "Company", "Amount", "Method", "Reference", "Action"]}
-            rows={clientPayments.map((payment) => {
-              const customerName = payment.clientName || invoices.find((inv) => inv.id === payment.invoiceId)?.clientName || "Company";
+            columns={["Date", "Invoice", "Shipment", "Company", "Amount", "Method", "Reference", "Action"]}
+            rows={visibleClientPayments.map((payment) => {
+              const invoice = invoiceById.get(payment.invoiceId);
+              const customerName = payment.clientName || invoice?.clientName || "Company";
               return [
                 formatDate(payment.paymentDate),
+                <span className="invoice-cell">{payment.invoiceNumber || invoice?.invoiceNumber || "-"}</span>,
+                shipmentLabel(payment.shipmentId ?? invoice?.shipmentId ?? null, payment.shipmentReference ?? invoice?.shipmentReference),
                 customerName,
                 money(signedClientPaymentAmount(payment)),
                 payment.paymentMethod || "-",
@@ -194,6 +245,7 @@ export function PaymentsPage({
             })}
           />
           {clientPayments.length === 0 && <EmptyState text="No company payment transactions recorded yet." />}
+          {clientPayments.length > 0 && visibleClientPayments.length === 0 && <EmptyState text="No company payments match the current search." />}
         </div>
         </>
       ) : (
@@ -204,7 +256,7 @@ export function PaymentsPage({
               <h3>Driver payout ledger</h3>
               <p>Trip-level driver payable amounts, advances, and pending balances.</p>
             </div>
-            <span className="status num">{shipments.length} rows</span>
+            <span className="status num">{visibleDriverRows.length} rows</span>
           </div>
           <div className="table-scroll">
             <table>
@@ -221,7 +273,7 @@ export function PaymentsPage({
                 </tr>
               </thead>
               <tbody>
-                {shipments.map((row) => {
+                {visibleDriverRows.map((row) => {
                   const pending = row.pending;
                   const status = row.driverPaymentStatus;
                   return (
@@ -241,16 +293,18 @@ export function PaymentsPage({
             </table>
             {loading && <EmptyState text="Loading driver payouts..." />}
             {!loading && !shipments.length && <EmptyState text="No driver payouts yet." />}
+            {!loading && shipments.length > 0 && !visibleDriverRows.length && <EmptyState text="No driver payouts match the current search." />}
           </div>
         </div>
         <div className="mt-6">
           <DataTable
             title="Driver Payouts History"
-            columns={["Date", "Driver", "Amount", "Type", "Method", "Reference", "Action"]}
-            rows={driverPayments.map((payment) => {
+            columns={["Date", "Shipment", "Driver", "Amount", "Type", "Method", "Reference", "Action"]}
+            rows={visibleDriverPayments.map((payment) => {
               const name = payment.driverName || shipments.find((s) => s.driverId === payment.driverId)?.driverName || "Driver";
               return [
                 formatDate(payment.paymentDate),
+                shipmentLabel(payment.shipmentId, payment.shipmentReference),
                 name,
                 money(signedDriverPaymentAmount(payment)),
                 payment.direction === -1 ? "Reversal" : labelize(payment.paymentType),
@@ -276,6 +330,7 @@ export function PaymentsPage({
             })}
           />
           {driverPayments.length === 0 && <EmptyState text="No driver payouts recorded yet." />}
+          {driverPayments.length > 0 && visibleDriverPayments.length === 0 && <EmptyState text="No driver payments match the current search." />}
         </div>
         </>
       )}
